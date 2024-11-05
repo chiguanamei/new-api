@@ -2,7 +2,7 @@ version: '3.4'
 
 services:
   new-api:
-    image: pengzhile/new-api:latest
+    image: nameizz/new-api:latest
     container_name: new-api
     restart: always
     command: --log-dir /app/logs
