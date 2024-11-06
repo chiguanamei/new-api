@@ -50,11 +50,18 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, req)
 	req.Header.Set("x-api-key", info.ApiKey)
+
 	anthropicVersion := c.Request.Header.Get("anthropic-version")
 	if anthropicVersion == "" {
 		anthropicVersion = "2023-06-01"
 	}
 	req.Header.Set("anthropic-version", anthropicVersion)
+
+	anthropicBeta := c.Request.Header.Get("anthropic-beta")
+	if "" != anthropicBeta {
+		req.Header.Set("anthropic-beta", anthropicBeta)
+	}
+
 	return nil
 }
 
@@ -79,9 +86,9 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage *dto.Usage, err *dto.OpenAIErrorWithStatusCode) {
 	if info.IsStream {
-		err, usage = claudeStreamHandler(c, resp, info, a.RequestMode)
+		err, usage = ClaudeStreamHandler(c, resp, info, a.RequestMode)
 	} else {
-		err, usage = claudeHandler(a.RequestMode, c, resp, info.PromptTokens, info.UpstreamModelName)
+		err, usage = ClaudeHandler(c, resp, a.RequestMode, info)
 	}
 	return
 }

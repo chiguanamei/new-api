@@ -27,7 +27,7 @@ type User struct {
 	WeChatId         string         `json:"wechat_id" gorm:"column:wechat_id;index"`
 	TelegramId       string         `json:"telegram_id" gorm:"column:telegram_id;index"`
 	VerificationCode string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
-	AccessToken      string         `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
+	AccessToken      *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
 	Quota            int            `json:"quota" gorm:"type:int;default:0"`
 	UsedQuota        int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
 	RequestCount     int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
@@ -39,6 +39,17 @@ type User struct {
 	InviterId        int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
 	StripeCustomer   string         `json:"stripe_customer" gorm:"column:stripe_customer;index"`
 	DeletedAt        gorm.DeletedAt `gorm:"index"`
+}
+
+func (user *User) GetAccessToken() string {
+	if user.AccessToken == nil {
+		return ""
+	}
+	return *user.AccessToken
+}
+
+func (user *User) SetAccessToken(token string) {
+	user.AccessToken = &token
 }
 
 // CheckUserExistOrDeleted check if user exist or deleted, if not exist, return false, nil, if deleted or exist, return true, nil
@@ -80,13 +91,18 @@ func SearchUsers(keyword string, group string) ([]*User, error) {
 	var users []*User
 	var err error
 
+	groupCol := "`group`"
+	if common.UsingPostgreSQL {
+		groupCol = `"group"`
+	}
+
 	// 尝试将关键字转换为整数ID
 	keywordInt, err := strconv.Atoi(keyword)
 	if err == nil {
 		// 如果转换成功，按照ID和可选的组别搜索用户
-		query := DB.Unscoped().Omit("password").Where("`id` = ?", keywordInt)
+		query := DB.Unscoped().Omit("password").Where("id = ?", keywordInt)
 		if group != "" {
-			query = query.Where("`group` = ?", group) // 使用反引号包围group
+			query = query.Where(groupCol+" = ?", group) // 使用反引号包围group
 		}
 		err = query.Find(&users).Error
 		if err != nil || len(users) > 0 {
@@ -97,9 +113,9 @@ func SearchUsers(keyword string, group string) ([]*User, error) {
 	err = nil
 
 	query := DB.Unscoped().Omit("password")
-	likeCondition := "`username` LIKE ? OR `email` LIKE ? OR `display_name` LIKE ?"
+	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
 	if group != "" {
-		query = query.Where("("+likeCondition+") AND `group` = ?", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", group)
+		query = query.Where("("+likeCondition+") AND "+groupCol+" = ?", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", group)
 	} else {
 		query = query.Where(likeCondition, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
 	}
@@ -218,7 +234,7 @@ func (user *User) Insert(inviterId int) error {
 		}
 	}
 	user.Quota = common.QuotaForNewUser
-	user.AccessToken = common.GetUUID()
+	//user.SetAccessToken(common.GetUUID())
 	user.AffCode = common.GetRandomString(4)
 	result := DB.Create(user)
 	if result.Error != nil {
@@ -312,11 +328,12 @@ func (user *User) ValidateAndFill() (err error) {
 	// that means if your field’s value is 0, '', false or other zero values,
 	// it won’t be used to build query conditions
 	password := user.Password
-	if user.Username == "" || password == "" {
+	username := strings.TrimSpace(user.Username)
+	if username == "" || password == "" {
 		return errors.New("用户名或密码为空")
 	}
 	// find buy username or email
-	DB.Where("username = ? OR email = ?", user.Username, user.Username).First(user)
+	DB.Where("username = ? OR email = ?", username, username).First(user)
 	okay := common.ValidatePasswordAndHash(password, user.Password)
 	if !okay || user.Status != common.UserStatusEnabled {
 		return errors.New("用户名或密码错误，或用户已被封禁")
@@ -364,14 +381,6 @@ func (user *User) FillUserByWeChatId() error {
 	return nil
 }
 
-func (user *User) FillUserByUsername() error {
-	if user.Username == "" {
-		return errors.New("username 为空！")
-	}
-	DB.Where(User{Username: user.Username}).First(user)
-	return nil
-}
-
 func (user *User) FillUserByTelegramId() error {
 	if user.TelegramId == "" {
 		return errors.New("Telegram id 为空！")
@@ -384,27 +393,27 @@ func (user *User) FillUserByTelegramId() error {
 }
 
 func IsEmailAlreadyTaken(email string) bool {
-	return DB.Where("email = ?", email).Find(&User{}).RowsAffected == 1
+	return DB.Unscoped().Where("email = ?", email).Find(&User{}).RowsAffected == 1
 }
 
 func IsWeChatIdAlreadyTaken(wechatId string) bool {
-	return DB.Where("wechat_id = ?", wechatId).Find(&User{}).RowsAffected == 1
+	return DB.Unscoped().Where("wechat_id = ?", wechatId).Find(&User{}).RowsAffected == 1
 }
 
 func IsGitHubIdAlreadyTaken(githubId string) bool {
-	return DB.Where("github_id = ?", githubId).Find(&User{}).RowsAffected == 1
+	return DB.Unscoped().Where("github_id = ?", githubId).Find(&User{}).RowsAffected == 1
 }
 
 func IsLinuxDoIdAlreadyTaken(linuxdoId string) bool {
-	return DB.Where("linuxdo_id = ?", linuxdoId).Find(&User{}).RowsAffected == 1
+	return DB.Unscoped().Where("linuxdo_id = ?", linuxdoId).Find(&User{}).RowsAffected == 1
 }
 
 func IsUsernameAlreadyTaken(username string) bool {
-	return DB.Where("username = ?", username).Find(&User{}).RowsAffected == 1
+	return DB.Unscoped().Where("username = ?", username).Find(&User{}).RowsAffected == 1
 }
 
 func IsTelegramIdAlreadyTaken(telegramId string) bool {
-	return DB.Where("telegram_id = ?", telegramId).Find(&User{}).RowsAffected == 1
+	return DB.Unscoped().Where("telegram_id = ?", telegramId).Find(&User{}).RowsAffected == 1
 }
 
 func ResetUserPasswordByEmail(email string, password string) error {
